@@ -173,7 +173,7 @@ async def main():
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)
                 await event.reply(f"Complete order data received for OrderID {order_data['OrderID']}: {previous_data}")
-                await process_complete_order(previous_data)
+                # await process_complete_order(previous_data)
             else:
                 await event.reply("Could not find matching OrderID for the data in your message.")
 
