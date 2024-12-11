@@ -9,26 +9,21 @@ def extract_message_data(message_element):
     if not message_text:
         return None
 
-    # Example of extracting specific information
     order_id = None
     phone = None
     url = None
     otp_code = None
 
-    # Extract OrderID
     if "OrderID:" in message_text:
         order_id = message_text.split("OrderID:")[1].split()[0]
 
-    # Extract Phone
     if "Phone:" in message_text:
         phone = message_text.split("Phone:")[1].split()[0]
 
-    # Extract URL
     if "http" in message_text:
         url = message_text.split("http")[1].split()[0]
         url = "http" + url  # Add 'http' prefix back
 
-    # Extract OTP Code
     if "OTP Code:" in message_text:
         otp_code = message_text.split("OTP Code:")[1].split()[0]
 
