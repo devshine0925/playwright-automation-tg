@@ -1,9 +1,9 @@
 import re
 import time
-import json
 import asyncio
 import logging
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 from playwright.async_api import async_playwright
 from playwright.async_api._generated import Page
 
@@ -12,12 +12,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 API_ID = 21968589
 API_HASH = 'b7270cc2655ab46c60fca0abc005cd96'
 BOT_TOKEN = '7679124575:AAEwLlbVV03iAH5i_wCzyOwE4ec_r01Pmmc'
-CHANNEL_USERNAME = '@nhan_otp_vinaphone_d3_bot' 
+CHANNEL_USERNAME = '@nhan_otp_vinaphone_d3_bot'
+CHAT_ID = "7192802252" 
 VIEWPORT_SIZE = {"width": 420, "height": 800}
 TIMEOUT = 100000  
 
 pending_orders = {}
 all_urls = {}
+ORDERS = []
+
 def extract_phone(message_text: str) -> str:
     match = re.search(r'Phone:\s*(\S+)', message_text)
     if match:
@@ -47,16 +50,9 @@ async def handle_browser_automation(order_data):
             context = await browser.new_context(viewport=VIEWPORT_SIZE)
             page = await context.new_page()
 
-            # Navigate to the specified page link
             await navigate_to_page(page, order_data["link"])
-
-            # Fill out the form on the page with order data
             await fill_form(page, order_data)
-
-            # Wait for a brief period to allow for any loading or processing
             await asyncio.sleep(5)
-
-            # Handle the result of the automation based on page state
             await handle_result(page, order_data)
 
             # Optionally, wait for a longer time if necessary
@@ -68,16 +64,51 @@ async def handle_browser_automation(order_data):
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
 
-
 async def navigate_to_page(page: Page, link: str):
-    """
-    Navigate to the provided link and wait for the page to load.
-    """
-    logging.info(f"Navigating to {link}")
-    await page.goto(link, timeout=1000000)
-    await page.wait_for_selector(".body-content", timeout=TIMEOUT)
-    logging.info("Page loaded and dynamic content detected.")
+    max_retries = 5
+    attempt = 0
 
+    while attempt < max_retries:
+        try:
+            logging.info(f"Navigating to {link} (Attempt {attempt + 1})")
+            await page.goto(link, timeout=10000)  # Adjust timeout as necessary
+            await page.wait_for_selector(".body-content", timeout=TIMEOUT)
+            await page.click('button[data-text="Đăng ký ngay"]', timeout=1000)
+            logging.info("Page loaded and dynamic content detected.")
+            return 
+        except TimeoutError as e:
+            logging.error(f"Loading page failed: {e}. Retrying...")
+            attempt += 1
+            if attempt == max_retries:
+                logging.error(f"Failed to load {link} after {max_retries} attempts.")
+                send_telegram_message("website refused.")  
+        
+async def fill_otp(page, order_data):
+    max_retries = 100
+    attempt = 0
+
+    # Loop until max retries are reached
+    while attempt < max_retries:
+        otp_data =  get_otp_from_pending_orders(order_data['OrderID'])
+        if otp_data:
+            await page.fill('input#otp', order_data["OTP"])
+            logging.info("OTP provided and filled.")
+            return  
+        else:
+            logging.warning(f"Attempt {attempt + 1}: No OTP found. Retrying...")
+            attempt += 1
+            await asyncio.sleep(1) 
+
+    # If the loop ends without finding an OTP
+    logging.error("Failed to find OTP after 100 attempts.")
+    send_telegram_message("otp failed.") 
+
+def get_otp_from_pending_orders(order_id):
+    order_data = pending_orders.get(order_id)
+    if order_data and 'OTP' in order_data:
+        return order_data['OTP']
+    else:
+        return None
 
 async def fill_form(page: Page, order_data: dict):
     logging.info("Filling out the form...")
@@ -86,31 +117,42 @@ async def fill_form(page: Page, order_data: dict):
     await page.fill('input#phone', order_data["Phone"])
     time.sleep(2)
     await page.click('button#submit_btn')
-    await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
-    if order_data.get("OTP"):
-        await page.fill('input#otp', order_data["OTP"])
-        logging.info("OTP provided and filled.")
-    else:
-        logging.warning("No OTP provided. Skipping OTP step.")
     time.sleep(2)
-    modal_selector = ".ant-modal.otp-modal"
-    modal = page.locator(modal_selector)
-    await modal.locator('button.btn-custom.btn-hover2').click()
+    invalid_phone = await page.is_visible('.ant-notification.ant-notification-topRight')
+    if invalid_phone:
+        message = f"Invalid phone number with Order ID: {order_data["order_id"]}"
+        await send_telegram_message(message)
+    else: 
+        await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
+        await fill_otp(page, order_data)
+        # if order_data.get("OTP"):
+        #     await page.fill('input#otp', order_data["OTP"])
+        #     logging.info("OTP provided and filled.")
+        # else:
+        #     logging.warning("No OTP provided. Skipping OTP step.")
+        time.sleep(2)
+        modal_selector = ".ant-modal.otp-modal"
+        modal = page.locator(modal_selector)
+        await modal.locator('button.btn-custom.btn-hover2').click()
+
+async def send_telegram_message( message):
+    if message == "Success":
+        print(message)
+    else:    
+        print("send message here.", message)
+    
 
 async def handle_result(page: Page, order_data: dict):
-    """
-    Handle the result of the form submission and log appropriate messages.
-    """
     error_selector = 'div.ant-form-item-explain-error'
     try:
-        # Check for errors
         await page.wait_for_selector(error_selector, state="visible", timeout=TIMEOUT)
         error_text = await page.text_content(error_selector)
         logging.error(f"Error message detected: {error_text}")
 
         if "Mã OTP không chính xác hoặc hết hiệu lực" in error_text:
-            await page.click('button.Button.tiny.primary.has-ripple')
             logging.info("Clicked the wrong OTP button.")
+            send_telegram_message("Wrong OTP")
+
     except Exception:
         # Check for success or failure
         is_success_visible = await page.is_visible('div.order-success.pt-5.text-center')
@@ -118,13 +160,31 @@ async def handle_result(page: Page, order_data: dict):
 
         if is_success_visible:
             logging.info("Order submitted successfully.")
+            send_telegram_message("Success")
         elif is_failed_visible:
             logging.error("Order submission failed.")
+            send_telegram_message("Wrong OTP")
+
         else:
             logging.warning("No visible success or failure state detected.")
+            send_telegram_message("Wrong OTP")
 
+async def find_and_click_button(message, button_text):
+    logging.info(f"Looking for button with text: '{button_text}'")
+    
+    if message.reply_markup:
+        if hasattr(message.reply_markup, 'rows'):
+            # Iterate through all the rows and buttons
+            for row in message.reply_markup.rows:
+                for button in row.buttons:
+                    # Check for button text match
+                    if button.text == button_text:
+                        # Simulate button click with the associated callback data
+                        logging.info(f"Button found: '{button.text}', sending data: {button.data}")
+                        await message.respond(button.data)
+                        return
+                    
 async def main():
-    # client = TelegramClient('session_name', API_ID, API_HASH)
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
     @client.on(events.NewMessage(chats='@nhan_otp_vinaphone_d3_bot'))
@@ -137,11 +197,13 @@ async def main():
             url = link_match.group(0)
             order_data = extract_order_data(message_text)
             order_data['link'] = url  
-
             pending_orders[order_data['OrderID']] = order_data
-            # await event.reply(f"Received Order with link: {url}")
-            await handle_browser_automation(order_data)
-
+            if order_data['OrderID'] not in ORDERS:
+                ORDERS.append(order_data['OrderID']) 
+                await handle_browser_automation(order_data)
+            else:
+                print('dupplicated Oder ID')
+            
         else:
             order_data = extract_order_data(message_text)
 
@@ -149,10 +211,8 @@ async def main():
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)
                 pending_orders[order_data['OrderID']] = previous_data
-                # await event.reply(f"Complete order data received for OrderID {order_data['OrderID']}: {previous_data}")
                 # await process_complete_order(previous_data)
             else:
-                # await event.reply("Could not find matching OrderID for the data in your message.")
                 print('non-matched message with OrderId')
 
     # Run the bot
