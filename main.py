@@ -14,56 +14,49 @@ API_HASH = 'b7270cc2655ab46c60fca0abc005cd96'
 BOT_TOKEN = '7679124575:AAEwLlbVV03iAH5i_wCzyOwE4ec_r01Pmmc'
 CHANNEL_USERNAME = '@nhan_otp_vinaphone_d3_bot'
 CHAT_ID = "7192802252" 
-VIEWPORT_SIZE = {"width": 420, "height": 800}
+VIEWPORT_SIZE = {"width": 420, "height": 720}
 TIMEOUT = 100000  
 
 pending_orders = {}
 all_urls = {}
 ORDERS = []
+msg = {}
 
-def extract_phone(message_text: str) -> str:
-    match = re.search(r'Phone:\s*(\S+)', message_text)
+def extract_number(pattern, message_text: str) -> str:
+    match = re.search(pattern, message_text)
     if match:
-        phone_number = match.group(1)  # Extract the phone number
-        if len(phone_number) > 2:
-            return phone_number[1:-1] 
+        _number = match.group(1)  # Extract the phone number
+        if len(_number) > 2:
+            return _number[1:-1] 
         else:
-            return None  # Return None if the phone number is too short
-
-    return None  # Return None if no match was found
+            return None  
+    return None 
 
 def extract_order_data(message_text: str) -> dict:
     order_data = {}
     order_data['OrderID'] = re.search(r'OrderID:\s*(\S+)', message_text).group(1) if re.search(r'OrderID:\s*(\S+)', message_text) else None
-    order_data['Phone'] = extract_phone(message_text)
+    order_data['Phone'] = extract_number(r'Phone:\s*(\S+)',message_text)
     order_data['Description'] = re.search(r'Description:\s*([\w\d-]+)', message_text).group(1) if re.search(r'Description:\s*([\w\d-]+)', message_text) else None
-    order_data['OTP'] = re.search(r'OTP Code:\s*(\S+)', message_text).group(1) if re.search(r'OTP Code:\s*(\S+)', message_text) else None
-    
-    print(order_data)
+    order_data['OTP'] = extract_number(r'OTP Code:\s*(\S+)', message_text)
     return order_data
 
 async def handle_browser_automation(order_data):
     try:
         async with async_playwright() as p:
-            # Launch browser with specified window size
-            browser = await p.chromium.launch(headless=False, args=["--window-size=420,800"])
+            browser = await p.chromium.launch(headless=False, args=["--window-size=420,720"])
             context = await browser.new_context(viewport=VIEWPORT_SIZE)
             page = await context.new_page()
 
             await navigate_to_page(page, order_data["link"])
             await fill_form(page, order_data)
-            await asyncio.sleep(5)
+            await asyncio.sleep(10)
             await handle_result(page, order_data)
-
-            # Optionally, wait for a longer time if necessary
-            await asyncio.sleep(30)
-
-            # Close the browser once done
+            await asyncio.sleep(10)
             await browser.close()
 
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
-
+        await send_telegram_message("automation faild")
 async def navigate_to_page(page: Page, link: str):
     max_retries = 5
     attempt = 0
@@ -71,11 +64,11 @@ async def navigate_to_page(page: Page, link: str):
     while attempt < max_retries:
         try:
             logging.info(f"Navigating to {link} (Attempt {attempt + 1})")
-            await page.goto(link, timeout=10000)  # Adjust timeout as necessary
+            await page.goto(link, timeout=TIMEOUT) 
             await page.wait_for_selector(".body-content", timeout=TIMEOUT)
-            await page.click('button[data-text="Đăng ký ngay"]', timeout=1000)
+            await page.wait_for_selector('button[data-text="Đăng ký ngay"]', timeout=10000)
             logging.info("Page loaded and dynamic content detected.")
-            return 
+            break 
         except TimeoutError as e:
             logging.error(f"Loading page failed: {e}. Retrying...")
             attempt += 1
@@ -84,12 +77,11 @@ async def navigate_to_page(page: Page, link: str):
                 send_telegram_message("website refused.")  
         
 async def fill_otp(page, order_data):
-    max_retries = 100
+    max_retries = 300
     attempt = 0
-
-    # Loop until max retries are reached
     while attempt < max_retries:
         otp_data =  get_otp_from_pending_orders(order_data['OrderID'])
+        print("otp_data", otp_data)
         if otp_data:
             await page.fill('input#otp', order_data["OTP"])
             logging.info("OTP provided and filled.")
@@ -99,8 +91,7 @@ async def fill_otp(page, order_data):
             attempt += 1
             await asyncio.sleep(1) 
 
-    # If the loop ends without finding an OTP
-    logging.error("Failed to find OTP after 100 attempts.")
+    logging.info("Failed to find OTP after 100 attempts.")
     send_telegram_message("otp failed.") 
 
 def get_otp_from_pending_orders(order_id):
@@ -114,34 +105,29 @@ async def fill_form(page: Page, order_data: dict):
     logging.info("Filling out the form...")
     await page.click('button[data-text="Đăng ký ngay"]')
     await page.wait_for_selector('div.ant-modal.form-modal', state="visible", timeout=TIMEOUT)
+    print("Order_data",order_data )
     await page.fill('input#phone', order_data["Phone"])
     time.sleep(2)
     await page.click('button#submit_btn')
-    time.sleep(2)
-    invalid_phone = await page.is_visible('.ant-notification.ant-notification-topRight')
-    if invalid_phone:
-        message = f"Invalid phone number with Order ID: {order_data["order_id"]}"
-        await send_telegram_message(message)
-    else: 
-        await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
-        await fill_otp(page, order_data)
-        # if order_data.get("OTP"):
-        #     await page.fill('input#otp', order_data["OTP"])
-        #     logging.info("OTP provided and filled.")
-        # else:
-        #     logging.warning("No OTP provided. Skipping OTP step.")
-        time.sleep(2)
-        modal_selector = ".ant-modal.otp-modal"
-        modal = page.locator(modal_selector)
-        await modal.locator('button.btn-custom.btn-hover2').click()
-
-async def send_telegram_message( message):
+    time.sleep(5)
+    try: 
+            await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
+            await fill_otp(page, order_data)
+            time.sleep(3)
+            modal_selector = ".ant-modal.otp-modal"
+            modal = page.locator(modal_selector)
+            await modal.locator('button.btn-custom.btn-hover2').click()
+    except Exception:
+        logging.info("error is occured.")
+        
+async def send_telegram_message(message):
     if message == "Success":
         print(message)
+        await find_and_click_button(msg,"Success")
     else:    
         print("send message here.", message)
+        await find_and_click_button(msg, "Wrong OTP")
     
-
 async def handle_result(page: Page, order_data: dict):
     error_selector = 'div.ant-form-item-explain-error'
     try:
@@ -151,7 +137,7 @@ async def handle_result(page: Page, order_data: dict):
 
         if "Mã OTP không chính xác hoặc hết hiệu lực" in error_text:
             logging.info("Clicked the wrong OTP button.")
-            send_telegram_message("Wrong OTP")
+            await send_telegram_message("Wrong OTP")
 
     except Exception:
         # Check for success or failure
@@ -160,30 +146,30 @@ async def handle_result(page: Page, order_data: dict):
 
         if is_success_visible:
             logging.info("Order submitted successfully.")
-            send_telegram_message("Success")
+            await send_telegram_message("Success")
         elif is_failed_visible:
             logging.error("Order submission failed.")
-            send_telegram_message("Wrong OTP")
+            await send_telegram_message("Wrong OTP")
 
         else:
             logging.warning("No visible success or failure state detected.")
-            send_telegram_message("Wrong OTP")
+            await send_telegram_message("Wrong OTP")
 
 async def find_and_click_button(message, button_text):
-    logging.info(f"Looking for button with text: '{button_text}'")
-    
-    if message.reply_markup:
-        if hasattr(message.reply_markup, 'rows'):
-            # Iterate through all the rows and buttons
-            for row in message.reply_markup.rows:
-                for button in row.buttons:
-                    # Check for button text match
-                    if button.text == button_text:
-                        # Simulate button click with the associated callback data
-                        logging.info(f"Button found: '{button.text}', sending data: {button.data}")
-                        await message.respond(button.data)
-                        return
-                    
+    if message:
+        logging.info(f"Looking for button with text: '{button_text}'")
+        logging.info(f"MESSAGES: '{message}'")
+        
+        if message.reply_markup:
+            if hasattr(message.reply_markup, 'rows'):
+                for row in message.reply_markup.rows:
+                    for button in row.buttons:
+                        if button.text == button_text:
+                            logging.info(f"Button found: '{button.text}', sending data: {button.data}")
+                            await message.respond(button.data)
+                            return
+    else:
+        logging.info("message data doesn't exsist!")                
 async def main():
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
@@ -205,6 +191,7 @@ async def main():
                 print('dupplicated Oder ID')
             
         else:
+            msg = event.message
             order_data = extract_order_data(message_text)
 
             if order_data.get('OrderID') in pending_orders:
