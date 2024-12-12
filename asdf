@@ -1,0 +1,79 @@
+import re
+from telethon import TelegramClient, events
+import asyncio
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Replace these with your credentials
+API_ID = 'your_api_id'
+API_HASH = 'your_api_hash'
+BOT_TOKEN = 'your_bot_token'
+
+# A dictionary to store pending orders
+pending_orders = {}
+
+def extract_order_data(message_text):
+    """Extract order data from the message text."""
+    # Example extraction logic; adapt as needed
+    order_data = {}
+    match = re.search(r'OrderID:\s*(\d+)', message_text)
+    if match:
+        order_data['OrderID'] = match.group(1)
+    return order_data
+
+async def handle_browser_automation(order_data):
+    """Handle browser automation for the received order data."""
+    logger.info(f"Automating browser for OrderID: {order_data['OrderID']} with link: {order_data.get('link')}")
+
+async def main():
+    """Main function to run the bot."""
+    # Initialize the Telegram client
+    client = TelegramClient('session_name', API_ID, API_HASH)
+
+    # Start the client with the bot token
+    await client.start(bot_token=BOT_TOKEN)
+
+    @client.on(events.NewMessage(chats='@nhan_otp_vinaphone_d3_bot'))
+    async def handler(event):
+        """Handle new messages from the specified bot."""
+        message_text = event.message.text
+        logger.info(f"Received message: {message_text}")
+
+        # Look for a URL in the message
+        link_match = re.search(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*(),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', message_text)
+
+        if link_match:
+            url = link_match.group(0)
+            order_data = extract_order_data(message_text)
+            order_data['link'] = url
+
+            # Store the order data
+            pending_orders[order_data['OrderID']] = order_data
+            logger.info(f"Pending order added: {order_data}")
+
+            # Automate the browser with the order data
+            await handle_browser_automation(order_data)
+
+        else:
+            # Extract order data if no link is found
+            order_data = extract_order_data(message_text)
+
+            if order_data.get('OrderID') in pending_orders:
+                previous_data = pending_orders[order_data['OrderID']]
+                previous_data.update(order_data)
+                pending_orders[order_data['OrderID']] = previous_data
+                logger.info(f"Order updated: {previous_data}")
+            else:
+                logger.warning(f"Non-matched message with OrderID: {order_data.get('OrderID')}")
+
+    # Run the bot until it is disconnected
+    await client.run_until_disconnected()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
