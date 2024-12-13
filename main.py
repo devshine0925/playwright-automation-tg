@@ -2,18 +2,22 @@ import re
 import time
 import asyncio
 import logging
+import os
+from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from playwright.async_api import async_playwright
 from playwright.async_api._generated import Page
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+load_dotenv()
 
-API_ID = 21968589
-API_HASH = 'b7270cc2655ab46c60fca0abc005cd96'
-BOT_TOKEN = '7679124575:AAEwLlbVV03iAH5i_wCzyOwE4ec_r01Pmmc'
+API_ID = os.getenv('API_ID') or 21968589
+API_HASH = os.getenv('API_HASH') or 'b7270cc2655ab46c60fca0abc005cd96'
+BOT_TOKEN = os.getenv('BOT_TOKEN') or '7679124575:AAEwLlbVV03iAH5i_wCzyOwE4ec_r01Pmmc'
+CHAT_ID = os.getenv('CHAT_ID') or "7192802252" 
+
 CHANNEL_USERNAME = '@nhan_otp_vinaphone_d3_bot'
-CHAT_ID = "7192802252" 
 VIEWPORT_SIZE = {"width": 420, "height": 720}
 TIMEOUT = 100000  
 
@@ -57,6 +61,7 @@ async def handle_browser_automation(order_data):
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
         await send_telegram_message("automation faild")
+
 async def navigate_to_page(page: Page, link: str):
     max_retries = 5
     attempt = 0
@@ -191,7 +196,9 @@ async def main():
                 print('dupplicated Oder ID')
             
         else:
+            global msg
             msg = event.message
+            print("message info===>",msg)
             order_data = extract_order_data(message_text)
 
             if order_data.get('OrderID') in pending_orders:
