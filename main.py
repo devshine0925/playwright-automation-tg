@@ -97,7 +97,7 @@ async def fill_otp(page, order_data):
             await asyncio.sleep(1) 
 
     logging.info("Failed to find OTP after 100 attempts.")
-    send_telegram_message("otp failed.") 
+    await send_telegram_message("otp failed.") 
 
 def get_otp_from_pending_orders(order_id):
     order_data = pending_orders.get(order_id)
@@ -116,12 +116,12 @@ async def fill_form(page: Page, order_data: dict):
     await page.click('button#submit_btn')
     time.sleep(5)
     try: 
-        await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
-        await fill_otp(page, order_data)
-        time.sleep(3)
-        modal_selector = ".ant-modal.otp-modal"
-        modal = page.locator(modal_selector)
-        await modal.locator('button.btn-custom.btn-hover2').click()
+            await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
+            await fill_otp(page, order_data)
+            time.sleep(3)
+            modal_selector = ".ant-modal.otp-modal"
+            modal = page.locator(modal_selector)
+            await modal.locator('button.btn-custom.btn-hover2').click()
     except Exception:
         logging.info("error is occured.")
         
@@ -129,11 +129,11 @@ async def send_telegram_message(message):
     if message == "Success":
         print(message)
         await find_and_click_button(msg,"Success")
-    elif  message == "Wrong OTP":    
+    elif message == "Wrong OTP":
+        await find_and_click_button(msg,"Wrong OTP")
+    else:    
         print("send message here.", message)
-        await find_and_click_button(msg, "Wrong OTP")
-    else:
-        await find_and_click_button(msg,"Failure")
+        await find_and_click_button(msg, "Failure")
     
 async def handle_result(page: Page, order_data: dict):
     error_selector = 'div.ant-form-item-explain-error'
@@ -141,13 +141,12 @@ async def handle_result(page: Page, order_data: dict):
         await page.wait_for_selector(error_selector, state="visible", timeout=TIMEOUT)
         error_text = await page.text_content(error_selector)
         logging.error(f"Error message detected: {error_text}")
-
         if "Mã OTP không chính xác hoặc hết hiệu lực" in error_text:
             logging.info("Clicked the wrong OTP button.")
             await send_telegram_message("Wrong OTP")
+        await send_telegram_message("Failure")
 
     except Exception:
-        # Check for success or failure
         is_success_visible = await page.is_visible('div.order-success.pt-5.text-center')
         is_failed_visible = await page.is_visible('div.order-failure.pt-5.text-center')
 
@@ -156,11 +155,11 @@ async def handle_result(page: Page, order_data: dict):
             await send_telegram_message("Success")
         elif is_failed_visible:
             logging.error("Order submission failed.")
-            await send_telegram_message("Wrong OTP")
+            await send_telegram_message("Failure")
 
         else:
             logging.warning("No visible success or failure state detected.")
-            await send_telegram_message("Wrong OTP")
+            await send_telegram_message("Failure")
 
 async def find_and_click_button(message, button_text):
     if message:
@@ -171,23 +170,17 @@ async def find_and_click_button(message, button_text):
             if button_text ==  "Success":
                 await message.click(data=b'success')
                 logging.info("click success button")
+                return
             elif button_text == "Wrong OTP":
                 await message.click(data=b'error_otp')
                 logging.info("click wrong otp button")
-
+                return
             else:
                 await message.click(data=b'failure')
                 logging.info("click failure button")
-
-            # if hasattr(message.reply_markup, 'rows'):
-            #     for row in message.reply_markup.rows:
-            #         for button in row.buttons:
-            #             if button.text == button_text:
-            #                 logging.info(f"Button found: '{button.text}', sending data: {button.data}")
-            #                 await message.respond(button.data)
-            #                 return
+                return
     else:
-        logging.info("message data doesn't exsist!")                
+        logging.info("message data doesn't exsist!")                 
 async def main():
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
@@ -218,6 +211,7 @@ async def main():
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)
                 pending_orders[order_data['OrderID']] = previous_data
+                # await process_complete_order(previous_data)
             else:
                 print('non-matched message with OrderId')
 
