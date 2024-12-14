@@ -195,11 +195,8 @@ async def main():
             order_data = extract_order_data(message_text)
             order_data['link'] = url  
             pending_orders[order_data['OrderID']] = order_data
-            if order_data['OrderID'] not in ORDERS:
-                ORDERS.append(order_data['OrderID']) 
-                await handle_browser_automation(order_data)
-            else:
-                print('dupplicated Oder ID')
+            ORDERS.append(order_data['OrderID']) 
+            await handle_browser_automation(order_data)
             
         else:
             global msg
@@ -211,11 +208,9 @@ async def main():
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)
                 pending_orders[order_data['OrderID']] = previous_data
-                # await process_complete_order(previous_data)
             else:
                 print('non-matched message with OrderId')
 
-    # Run the bot
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
