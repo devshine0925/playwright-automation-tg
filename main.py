@@ -116,12 +116,12 @@ async def fill_form(page: Page, order_data: dict):
     await page.click('button#submit_btn')
     time.sleep(5)
     try: 
-            await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
-            await fill_otp(page, order_data)
-            time.sleep(3)
-            modal_selector = ".ant-modal.otp-modal"
-            modal = page.locator(modal_selector)
-            await modal.locator('button.btn-custom.btn-hover2').click()
+        await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
+        await fill_otp(page, order_data)
+        time.sleep(3)
+        modal_selector = ".ant-modal.otp-modal"
+        modal = page.locator(modal_selector)
+        await modal.locator('button.btn-custom.btn-hover2').click()
     except Exception:
         logging.info("error is occured.")
         
@@ -129,9 +129,11 @@ async def send_telegram_message(message):
     if message == "Success":
         print(message)
         await find_and_click_button(msg,"Success")
-    else:    
+    elif  message == "Wrong OTP":    
         print("send message here.", message)
         await find_and_click_button(msg, "Wrong OTP")
+    else:
+        await find_and_click_button(msg,"Failure")
     
 async def handle_result(page: Page, order_data: dict):
     error_selector = 'div.ant-form-item-explain-error'
@@ -166,13 +168,24 @@ async def find_and_click_button(message, button_text):
         logging.info(f"MESSAGES: '{message}'")
         
         if message.reply_markup:
-            if hasattr(message.reply_markup, 'rows'):
-                for row in message.reply_markup.rows:
-                    for button in row.buttons:
-                        if button.text == button_text:
-                            logging.info(f"Button found: '{button.text}', sending data: {button.data}")
-                            await message.respond(button.data)
-                            return
+            if button_text ==  "Success":
+                await message.click(data=b'success')
+                logging.info("click success button")
+            elif button_text == "Wrong OTP":
+                await message.click(data=b'error_otp')
+                logging.info("click wrong otp button")
+
+            else:
+                await message.click(data=b'failure')
+                logging.info("click failure button")
+
+            # if hasattr(message.reply_markup, 'rows'):
+            #     for row in message.reply_markup.rows:
+            #         for button in row.buttons:
+            #             if button.text == button_text:
+            #                 logging.info(f"Button found: '{button.text}', sending data: {button.data}")
+            #                 await message.respond(button.data)
+            #                 return
     else:
         logging.info("message data doesn't exsist!")                
 async def main():
@@ -205,7 +218,6 @@ async def main():
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)
                 pending_orders[order_data['OrderID']] = previous_data
-                # await process_complete_order(previous_data)
             else:
                 print('non-matched message with OrderId')
 
