@@ -12,10 +12,10 @@ from playwright.async_api._generated import Page
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 load_dotenv()
 
-API_ID = os.getenv('API_ID') or 21968589
-API_HASH = os.getenv('API_HASH') or 'b7270cc2655ab46c60fca0abc005cd96'
-BOT_TOKEN = os.getenv('BOT_TOKEN') or '7679124575:AAEwLlbVV03iAH5i_wCzyOwE4ec_r01Pmmc'
-CHAT_ID = os.getenv('CHAT_ID') or "7192802252" 
+API_ID = os.getenv('API_ID') 
+API_HASH = os.getenv('API_HASH') 
+BOT_TOKEN = os.getenv('BOT_TOKEN') 
+CHAT_ID = os.getenv('CHAT_ID') 
 
 CHANNEL_USERNAME = '@nhan_otp_vinaphone_d3_bot'
 VIEWPORT_SIZE = {"width": 420, "height": 720}
@@ -25,6 +25,7 @@ pending_orders = {}
 all_urls = {}
 ORDERS = []
 msg = {}
+browswer = None
 
 def extract_number(pattern, message_text: str) -> str:
     match = re.search(pattern, message_text)
@@ -46,12 +47,13 @@ def extract_order_data(message_text: str) -> dict:
 
 async def handle_browser_automation(order_data):
     try:
+        global browser
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=False, args=["--window-size=420,720"])
             context = await browser.new_context(viewport=VIEWPORT_SIZE)
             page = await context.new_page()
 
-            await navigate_to_page(page, order_data["link"])
+            await navigate_to_page(page, order_data["link"], browser)
             await fill_form(page, order_data)
             await asyncio.sleep(10)
             await handle_result(page, order_data)
@@ -62,7 +64,7 @@ async def handle_browser_automation(order_data):
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
         await send_telegram_message("automation faild")
 
-async def navigate_to_page(page: Page, link: str):
+async def navigate_to_page(page: Page, link: str, browser):
     max_retries = 5
     attempt = 0
 
@@ -71,7 +73,7 @@ async def navigate_to_page(page: Page, link: str):
             logging.info(f"Navigating to {link} (Attempt {attempt + 1})")
             await page.goto(link, timeout=TIMEOUT) 
             await page.wait_for_selector(".body-content", timeout=TIMEOUT)
-            await page.wait_for_selector('button[data-text="Đăng ký ngay"]', timeout=10000)
+            await page.wait_for_selector('button[data-text="Đăng ký ngay"]', timeout=8000)
             logging.info("Page loaded and dynamic content detected.")
             break 
         except TimeoutError as e:
@@ -79,7 +81,8 @@ async def navigate_to_page(page: Page, link: str):
             attempt += 1
             if attempt == max_retries:
                 logging.error(f"Failed to load {link} after {max_retries} attempts.")
-                send_telegram_message("website refused.")  
+                if browser:
+                    await browser.close()
         
 async def fill_otp(page, order_data):
     max_retries = 300
@@ -94,10 +97,13 @@ async def fill_otp(page, order_data):
         else:
             logging.warning(f"Attempt {attempt + 1}: No OTP found. Retrying...")
             attempt += 1
-            await asyncio.sleep(1) 
+            await asyncio.sleep(1)
+             
 
     logging.info("Failed to find OTP after 100 attempts.")
-    await send_telegram_message("otp failed.") 
+    await send_telegram_message("otp failed.")
+    if browser:
+        await browser.close() 
 
 def get_otp_from_pending_orders(order_id):
     order_data = pending_orders.get(order_id)
@@ -110,18 +116,18 @@ async def fill_form(page: Page, order_data: dict):
     logging.info("Filling out the form...")
     await page.click('button[data-text="Đăng ký ngay"]')
     await page.wait_for_selector('div.ant-modal.form-modal', state="visible", timeout=TIMEOUT)
-    print("Order_data",order_data )
+    # print("Order_data",order_data )
     await page.fill('input#phone', order_data["Phone"])
     time.sleep(2)
     await page.click('button#submit_btn')
     time.sleep(5)
     try: 
-            await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
-            await fill_otp(page, order_data)
-            time.sleep(3)
-            modal_selector = ".ant-modal.otp-modal"
-            modal = page.locator(modal_selector)
-            await modal.locator('button.btn-custom.btn-hover2').click()
+        await page.wait_for_selector('div.ant-modal.otp-modal', state="visible", timeout=TIMEOUT)
+        await fill_otp(page, order_data)
+        time.sleep(3)
+        modal_selector = ".ant-modal.otp-modal"
+        modal = page.locator(modal_selector)
+        await modal.locator('button.btn-custom.btn-hover2').click()
     except Exception:
         logging.info("error is occured.")
         
@@ -184,7 +190,7 @@ async def find_and_click_button(message, button_text):
 async def main():
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
-    @client.on(events.NewMessage(chats='@nhan_otp_vinaphone_d3_bot'))
+    @client.on(events.NewMessage(chats=CHANNEL_USERNAME))
     async def handler(event):
         message_text = event.message.text
 
