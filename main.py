@@ -17,7 +17,7 @@ API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN') 
 CHAT_ID = os.getenv('CHAT_ID') 
 
-CHANNEL_USERNAME = '@nhan_otp_vinaphone_d3_bot'
+CHANNEL_USERNAME = '@kinhdoanhviettel_bot'
 VIEWPORT_SIZE = {"width": 420, "height": 720}
 TIMEOUT = 100000  
 
@@ -26,7 +26,11 @@ all_urls = {}
 ORDERS = []
 msg = {}
 browswer = None
-
+async def close_broswer(br):
+    await br.close()
+    global browser
+    browser = None
+    
 def extract_number(pattern, message_text: str) -> str:
     match = re.search(pattern, message_text)
     if match:
@@ -59,7 +63,7 @@ async def handle_browser_automation(order_data):
             await handle_result(page, order_data)
             await asyncio.sleep(10)
             await browser.close()
-
+            browser =  None
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
         await send_telegram_message("automation faild")
@@ -73,23 +77,25 @@ async def navigate_to_page(page: Page, link: str, browser):
             logging.info(f"Navigating to {link} (Attempt {attempt + 1})")
             await page.goto(link, timeout=TIMEOUT) 
             await page.wait_for_selector(".body-content", timeout=TIMEOUT)
-            await page.wait_for_selector('button[data-text="Đăng ký ngay"]', timeout=8000)
+            await page.wait_for_selector('button[data-text="Đăng ký ngay"]', timeout=10000)
             logging.info("Page loaded and dynamic content detected.")
             break 
         except TimeoutError as e:
             logging.error(f"Loading page failed: {e}. Retrying...")
+            await page.reload(timeout=TIMEOUT)
             attempt += 1
             if attempt == max_retries:
                 logging.error(f"Failed to load {link} after {max_retries} attempts.")
                 if browser:
-                    await browser.close()
-        
+                    await close_broswer(browser)
+            else:
+                time.sleep(30)
+
 async def fill_otp(page, order_data):
     max_retries = 300
     attempt = 0
     while attempt < max_retries:
         otp_data =  get_otp_from_pending_orders(order_data['OrderID'])
-        print("otp_data", otp_data)
         if otp_data:
             await page.fill('input#otp', order_data["OTP"])
             logging.info("OTP provided and filled.")
@@ -103,7 +109,7 @@ async def fill_otp(page, order_data):
     logging.info("Failed to find OTP after 100 attempts.")
     await send_telegram_message("otp failed.")
     if browser:
-        await browser.close() 
+        await close_broswer(browser) 
 
 def get_otp_from_pending_orders(order_id):
     order_data = pending_orders.get(order_id)
@@ -130,7 +136,8 @@ async def fill_form(page: Page, order_data: dict):
         await modal.locator('button.btn-custom.btn-hover2').click()
     except Exception:
         logging.info("error is occured.")
-        
+        if browswer:
+            await browswer.close()   
 async def send_telegram_message(message):
     if message == "Success":
         print(message)
@@ -162,10 +169,11 @@ async def handle_result(page: Page, order_data: dict):
         elif is_failed_visible:
             logging.error("Order submission failed.")
             await send_telegram_message("Failure")
-
         else:
             logging.warning("No visible success or failure state detected.")
             await send_telegram_message("Failure")
+        if browswer:
+            await browswer.close()
 
 async def find_and_click_button(message, button_text):
     if message:
@@ -176,17 +184,20 @@ async def find_and_click_button(message, button_text):
             if button_text ==  "Success":
                 await message.click(data=b'success')
                 logging.info("click success button")
-                return
+                
             elif button_text == "Wrong OTP":
                 await message.click(data=b'error_otp')
                 logging.info("click wrong otp button")
-                return
+               
             else:
                 await message.click(data=b'failure')
                 logging.info("click failure button")
-                return
+            
+            return
     else:
-        logging.info("message data doesn't exsist!")                 
+        logging.info("message data doesn't exsist!")
+    # if browser:
+    #     await close_broswer(browser)                
 async def main():
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
