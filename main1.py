@@ -17,14 +17,14 @@ API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN') 
 CHAT_ID = os.getenv('CHAT_ID') 
 
-CHANNEL_USERNAME = '@digibiztech1'
+CHANNEL_USERNAME =os.getenv('CHANNEL_USERNAME')
 VIEWPORT_SIZE = {"width": 420, "height": 720}
 TIMEOUT = 100000  
 
 pending_orders = {}
 all_urls = {}
 ORDERS = []
-msg = {}
+msg = []
 browswer = None
 
 async def close_broswer(br):
@@ -237,10 +237,9 @@ async def main():
             
         else:
             global msg
-            msg = event.message
-            print("message info===>",msg)
             order_data = extract_order_data(message_text)
-
+            if order_data.get('OrderID'):
+                msg.append(event.message)
             if order_data.get('OrderID') in pending_orders:
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)
