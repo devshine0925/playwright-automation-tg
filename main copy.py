@@ -17,7 +17,7 @@ API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN') 
 CHAT_ID = os.getenv('CHAT_ID') 
 
-CHANNEL_USERNAME = '@kinhdoanhviettel_bot'
+CHANNEL_USERNAME = '@digibiztech1'
 VIEWPORT_SIZE = {"width": 420, "height": 720}
 TIMEOUT = 100000  
 
