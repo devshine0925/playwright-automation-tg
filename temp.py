@@ -34,6 +34,6 @@ try:
     while True:  # Infinite loop for continuous sending
         for chat_id in chat_ids:
             send_message(message_text, chat_id)
-        time.sleep(300)  # Wait 20 seconds before the next iteration
+        time.sleep(50)  # Wait 20 seconds before the next iteration
 except KeyboardInterrupt:
     print("Stopped sending messages.")

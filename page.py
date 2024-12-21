@@ -3,10 +3,8 @@ from playwright.async_api import async_playwright
 from playwright.async_api._generated import Page
 import time
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Constants
 VIEWPORT_SIZE = {"width": 420, "height": 800}
 TIMEOUT = 10000  # Timeout in milliseconds
 
@@ -61,8 +59,6 @@ async def fill_form(page: Page, order_data: dict):
     modal_selector = ".ant-modal.otp-modal"
     modal = page.locator(modal_selector)
     await modal.locator('button.btn-custom.btn-hover2').click()
-    # await page.click('button.btn-custom.btn-hover2')
-
 
 async def handle_result(page: Page, order_data: dict):
     """
