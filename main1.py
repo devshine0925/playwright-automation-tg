@@ -43,8 +43,11 @@ def extract_order_id(message):
 
 def find_item(orderID):
    matching_messages = [msg for msg in MSG if extract_order_id(msg) == orderID]
-   return matching_messages[0]    
-
+   if len(matching_messages)>0:
+       return matching_messages[0]    
+   else:
+       return {}
+   
 def extract_number(pattern, message_text: str) -> str:
     match = re.search(pattern, message_text)
     if match:
@@ -67,7 +70,7 @@ async def handle_browser_automation(order_data):
     try:
         global browser
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, args=["--window-size=420,720"])
+            browser = await p.chromium.launch(headless=False, args=["--window-size=430,720"])
             context = await browser.new_context(viewport=VIEWPORT_SIZE)
             page = await context.new_page()
 
