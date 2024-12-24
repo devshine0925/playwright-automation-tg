@@ -79,7 +79,8 @@ async def handle_browser_automation(order_data):
             await asyncio.sleep(3)
             await handle_result(page, order_data['OrderID'])
             await asyncio.sleep(3)
-            await browser.close()
+            if browser:
+                await browser.close()
             browser =  None
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
@@ -201,8 +202,15 @@ async def handle_result(page: Page, order_id):
             await send_telegram_message("Failure", order_id)
 
     except Exception:
+        img_element = await page.query_selector('img.order-success__logo')
         is_success_visible = await page.is_visible('div.order-success.pt-5.text-center')
-        if is_success_visible:
+        img_success_flug = False
+        if img_element:
+            attr =  await img_element.get_attribute("src")
+            if "success" in attr:
+                img_success_flug = True
+
+        if is_success_visible or img_success_flug:
             logging.info("Order submitted successfully.")
             await send_telegram_message("Success", order_id)
             return

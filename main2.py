@@ -21,13 +21,17 @@ class Config:
     CHAT_ID = os.getenv('CHAT_ID')   
     CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME')  
     VIEWPORT_SIZE = {"width": 430, "height": 720}  
-    TIMEOUT = 100000  
+    TIMEOUT = 100000
+    SUCCESS = "Success"
+    FAILURE = "Failure"
+    WRONGOTP = "Wrong OTP"  
 
 class OrderProcessor:  
     def __init__(self):  
         self.pending_orders = {}  
         self.todos = []  
-        self.browser = None  
+        self.browser = None
+        self.order_id = []  
 
     async def close_browser(self):  
         if self.browser:  
@@ -41,6 +45,10 @@ class OrderProcessor:
         else:
             return {}
     
+    def remove_item(self, orderID):
+        matching_messages = [msg for msg in self.todos if self.extract_order_id(msg) != orderID]
+        self.todos  =  matching_messages
+
     def extract_order_id(self, message):  
         match = re.search(r'OrderID:\s*(\d+)', message.text)  
         return match.group(1) if match else None   
@@ -63,22 +71,37 @@ class OrderProcessor:
         order_data['OTP'] = self.extract_number(r'OTP Code:\s*(\S+)', message)
         return order_data
      
-    async def handle_browser_automation(self, order_data):  
+    async def handle_browser_automation(self, order_data):
+        if order_data['OrderID'] is None:
+            logging.error("Invalid order ID: None")
+            return  
         try:  
             async with async_playwright() as p:  
+                
                 self.browser = await p.chromium.launch(headless=False, args=["--window-size=430,720"])  
                 context = await self.browser.new_context(viewport=Config.VIEWPORT_SIZE)  
                 page = await context.new_page()  
+                
+                try:
+                    await self.navigate_to_page(page, order_data["link"])
+                except  Exception as e:
+                    logging.error("error in navigate_to_page function.")
+                try:
+                    await self.fill_form(page, order_data)
+                except  Exception as e:
+                    logging.error("error in fill_form function.")  
+                await asyncio.sleep(3)
+                try:  
+                    await self.handle_result(page, order_data['OrderID'])
+                except  Exception as e:
+                    logging.error("error in handle_result function.")
+                if self.browser:
+                    await self.close_browser()
 
-                await self.navigate_to_page(page, order_data["link"])  
-                await self.fill_form(page, order_data)  
-                await asyncio.sleep(3)  
-                await self.handle_result(page, order_data['OrderID'])  
         except Exception as e:  
             logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")  
             await self.send_telegram_message("Automation failed", order_data['OrderID'])  
-        finally:  
-            await self.close_browser()  
+              
 
     async def navigate_to_page(self, page: Page, link: str):  
         max_retries = 5  
@@ -135,32 +158,48 @@ class OrderProcessor:
             logging.error("Error occurred while filling form: %s", e)  
             await self.close_browser()  
 
-    async def send_telegram_message(self, message, order_id):  
-        msg = self.find_item(order_id)  
+    async def send_telegram_message(self, message, orderId):  
+        msg = self.find_item(orderId)  
         if message == "Success":  
-            await self.find_and_click_button(msg, "Success")  
+            await self.find_and_click_button(msg, Config.SUCCESS)  
         elif message == "Wrong OTP":  
-            await self.find_and_click_button(msg, "Wrong OTP")  
+            await self.find_and_click_button(msg, Config.WRONGOTP)  
         else:    
-            await self.find_and_click_button(msg, "Failure")  
+            await self.find_and_click_button(msg, Config.FAILURE)
+        self.remove_item(orderId)  
 
-    async def handle_result(self, page: Page, order_id):  
+    async def handle_result(self, page: Page, order_id):
+        if order_id is None:
+            logging.error("Invalid order ID: None")
+            return  
         error_selector = 'div.ant-form-item-explain-error'  
         try:  
             await page.wait_for_selector(error_selector, state="visible", timeout=Config.TIMEOUT)  
             error_text = await page.text_content(error_selector)  
             logging.error(f"Error message detected: {error_text}")  
             if "Mã OTP không chính xác hoặc hết hiệu lực" in error_text:  
-                await self.send_telegram_message("Wrong OTP", order_id)  
+                await self.send_telegram_message(Config.WRONGOTP, order_id)  
             else:  
-                await self.send_telegram_message("Failure", order_id)  
-        except Exception:  
-            if await page.is_visible('div.order-success.pt-5.text-center'):  
-                await self.send_telegram_message("Success", order_id)  
-            elif await page.is_visible('div.order-failure.pt-5.text-center'):  
-                await self.send_telegram_message("Failure", order_id)  
-            else:  
-                await self.send_telegram_message("Unknown failure", order_id)  
+                await self.send_telegram_message(Config.FAILURE, order_id)  
+        except Exception:
+            # try:
+                is_visible = await page.is_visible('div.order-success.pt-5.text-center')
+                if  is_visible:
+                        await self.send_telegram_message(Config.SUCCESS, order_id)
+                        logging.info("sent with success result")
+                # elif await page.is_visible('div.order-failure.pt-5.text-center') :
+                #         await self.send_telegram_message(Config.FAILURE, order_id)
+                #         logging.info("send in is_visible_failure result")
+                #         return  
+                else:
+                        await self.send_telegram_message(Config.FAILURE, order_id)
+                        logging.info("sent with failure result")
+                        
+                # if browswer:
+                #     await browswer.close()
+            # except Exception as e:
+            #     logging.error("error in comparing result: %s",e)
+            #     return 
 
     async def find_and_click_button(self, message, button_text):  
         if message and message.reply_markup:  
@@ -175,7 +214,8 @@ class OrderProcessor:
         else:  
             logging.info("Message data doesn't exist!")  
 
-async def main():  
+async def main():
+
     async with TelegramClient('session_name', Config.API_ID, Config.API_HASH) as client:  
         await client.start(bot_token=Config.BOT_TOKEN)  
         order_processor = OrderProcessor()  
@@ -187,12 +227,15 @@ async def main():
 
             if link_match:  
                 url = link_match.group(0)  
-                order_data = order_processor.extract_order_data(message_text)  
-                order_data['link'] = url  
-                order_processor.pending_orders[order_data['OrderID']] = order_data  
-                await order_processor.handle_browser_automation(order_data)  
+                order_data = order_processor.extract_order_data(message_text)
+                if order_data and url and order_data['OrderID']:  
+                    order_data['link'] = url  
+                    order_processor.pending_orders[order_data['OrderID']] = order_data  
+                    await order_processor.handle_browser_automation(order_data)
+                else:
+                    logging.warning('invalid Order_data')    
+
             else:  
-                # Handle messages without links  
                 order_data = order_processor.extract_order_data(message_text)  
                 if order_data.get('OrderID'):  
                     order_processor.todos.append(event.message)  
@@ -201,6 +244,7 @@ async def main():
                         previous_data.update(order_data)  
                     else:  
                         logging.warning('Non-matched message with OrderID')  
+                
 
         await client.run_until_disconnected()  
 
