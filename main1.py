@@ -2,6 +2,7 @@ import re
 import time
 import asyncio
 import logging
+import uuid
 import os
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
@@ -25,7 +26,7 @@ pending_orders = {}
 all_urls = {}
 ORDERS = []
 MSG = []
-browswer = None
+browser_variables = []
 
 async def close_broswer(br):
     await br.close()
@@ -68,20 +69,23 @@ def extract_order_data(message_text: str) -> dict:
 
 async def handle_browser_automation(order_data):
     try:
-        global browser
+        global browser_variables
         async with async_playwright() as p:
+            
             browser = await p.chromium.launch(headless=False, args=["--window-size=430,720"])
             context = await browser.new_context(viewport=VIEWPORT_SIZE)
             page = await context.new_page()
-
+            variable_id = str(uuid.uuid4())
+            browser_variables.append({
+                "id": variable_id,
+                "variable": browser
+            })
             await navigate_to_page(page, order_data["link"], browser)
             await fill_form(page, order_data)
             await asyncio.sleep(3)
             await handle_result(page, order_data['OrderID'])
             await asyncio.sleep(3)
-            if browser:
-                await browser.close()
-            browser =  None
+            await browser.close()
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
         await send_telegram_message("automation faild", order_data['OrderID'])
@@ -172,8 +176,8 @@ async def fill_form(page: Page, order_data: dict):
         await modal.locator('button.btn-custom.btn-hover2').click()
     except Exception:
         logging.info("error is occured.")
-        if browswer:
-            await browswer.close()   
+        # if browswer:
+        #     await browswer.close()   
 
 async def send_telegram_message(message, order_id):
     msg = find_item(order_id)
@@ -187,6 +191,22 @@ async def send_telegram_message(message, order_id):
         await find_and_click_button(msg, "Failure")
 
     remove_item(order_id)
+
+async def extract_order_info( page: Page):
+        """Extract status text and image source from the order result."""
+        try:
+            # Extract the text "ĐĂNG KÝ THÀNH CÔNG"
+            status_text = await page.inner_text('.order-result-info__title-status span')
+            # Extract the src attribute of the img element
+            img_src = await page.get_attribute('.order-result-info__ic-status img', 'src')
+            if status_text == "ĐĂNG KÝ THÀNH CÔNG" or img_src == "/static/imgs/ic_order_success.svg":
+                return True
+            else:
+                return False         
+        except Exception as e:
+            print(f"An error occurred during extraction: {e}")
+            return False
+     
 
 async def handle_result(page: Page, order_id):
     error_selector = 'div.ant-form-item-explain-error'
@@ -202,32 +222,17 @@ async def handle_result(page: Page, order_id):
             await send_telegram_message("Failure", order_id)
 
     except Exception:
-        img_element = await page.query_selector('img.order-success__logo')
         is_success_visible = await page.is_visible('div.order-success.pt-5.text-center')
-        img_success_flug = False
-        if img_element:
-            attr =  await img_element.get_attribute("src")
-            if "success" in attr:
-                img_success_flug = True
 
-        if is_success_visible or img_success_flug:
+        if is_success_visible:
             logging.info("Order submitted successfully.")
             await send_telegram_message("Success", order_id)
             return
-        message_content = "div.order-result-mobile"
-        content = page.locator(message_content)
-        msg_txt = content.locator("div.order-result-info__title-status span")
-        is_success_message = await msg_txt.is_visible()
-        if is_success_message:
+        
+        if await extract_order_info(page):
             logging.info("Success message is visible.")
-            success_text = page.text_content("div.order-result-info__title-status span")
-            if "ĐĂNG KÝ THÀNH CÔNG" in success_text:
-                logging.info("Order submitted successfully.")
-                await send_telegram_message("Success", order_id)
-                return
-            else:
-                 await send_telegram_message("Failure", order_id)
-                 return
+            await send_telegram_message("Success", order_id)
+            return
         is_failed_visible = await page.is_visible('div.order-failure.pt-5.text-center')
         if is_failed_visible:
             logging.error("Order submission failed.")
