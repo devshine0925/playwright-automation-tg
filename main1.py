@@ -2,6 +2,7 @@ import re
 import time
 import asyncio
 import logging
+import uuid
 import os
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
@@ -17,21 +18,37 @@ API_HASH = os.getenv('API_HASH')
 BOT_TOKEN = os.getenv('BOT_TOKEN') 
 CHAT_ID = os.getenv('CHAT_ID') 
 
-CHANNEL_USERNAME = '@digibiztech1'
+CHANNEL_USERNAME =os.getenv('CHANNEL_USERNAME')
 VIEWPORT_SIZE = {"width": 420, "height": 720}
 TIMEOUT = 100000  
 
 pending_orders = {}
 all_urls = {}
 ORDERS = []
-msg = {}
-browswer = None
+MSG = []
+browser_variables = []
 
 async def close_broswer(br):
     await br.close()
     global browser
     browser = None
-    
+
+def remove_item(order_id):
+    global MSG
+    if len(MSG)>0:
+        MSG = [msg for msg in MSG if extract_order_id(msg) != order_id]
+
+def extract_order_id(message):
+    match = re.search(r'OrderID:\s*(\d+)', message.text)
+    return match.group(1) if match else None 
+
+def find_item(orderID):
+   matching_messages = [msg for msg in MSG if extract_order_id(msg) == orderID]
+   if len(matching_messages)>0:
+       return matching_messages[0]    
+   else:
+       return {}
+   
 def extract_number(pattern, message_text: str) -> str:
     match = re.search(pattern, message_text)
     if match:
@@ -52,22 +69,26 @@ def extract_order_data(message_text: str) -> dict:
 
 async def handle_browser_automation(order_data):
     try:
-        global browser
+        global browser_variables
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=False, args=["--window-size=420,720"])
+            
+            browser = await p.chromium.launch(headless=False, args=["--window-size=430,720"])
             context = await browser.new_context(viewport=VIEWPORT_SIZE)
             page = await context.new_page()
-
+            variable_id = str(uuid.uuid4())
+            browser_variables.append({
+                "id": variable_id,
+                "variable": browser
+            })
             await navigate_to_page(page, order_data["link"], browser)
             await fill_form(page, order_data)
-            await asyncio.sleep(10)
-            await handle_result(page, order_data)
-            await asyncio.sleep(10)
+            await asyncio.sleep(3)
+            await handle_result(page, order_data['OrderID'])
+            await asyncio.sleep(3)
             await browser.close()
-            browser =  None
     except Exception as e:
         logging.error(f"Automation failed for OrderID {order_data['OrderID']}: {e}")
-        # await send_telegram_message("automation faild")
+        await send_telegram_message("automation faild", order_data['OrderID'])
 
 async def navigate_to_page(page: Page, link: str, browser):
     max_retries = 5
@@ -142,7 +163,6 @@ async def fill_form(page: Page, order_data: dict):
     logging.info("Filling out the form...")
     await page.click('button[data-text="Đăng ký ngay"]')
     await page.wait_for_selector('div.ant-modal.form-modal', state="visible", timeout=TIMEOUT)
-    # print("Order_data",order_data )
     await page.fill('input#phone', order_data["Phone"])
     time.sleep(2)
     await page.click('button#submit_btn')
@@ -156,19 +176,39 @@ async def fill_form(page: Page, order_data: dict):
         await modal.locator('button.btn-custom.btn-hover2').click()
     except Exception:
         logging.info("error is occured.")
-        if browswer:
-            await browswer.close()   
-async def send_telegram_message(message):
+        # if browswer:
+        #     await browswer.close()   
+
+async def send_telegram_message(message, order_id):
+    msg = find_item(order_id)
+
+    print(order_id)
     if message == "Success":
-        print(message)
         await find_and_click_button(msg,"Success")
     elif message == "Wrong OTP":
         await find_and_click_button(msg,"Wrong OTP")
     else:    
-        print("send message here.", message)
         await find_and_click_button(msg, "Failure")
-    
-async def handle_result(page: Page, order_data: dict):
+
+    remove_item(order_id)
+
+async def extract_order_info( page: Page):
+        """Extract status text and image source from the order result."""
+        try:
+            # Extract the text "ĐĂNG KÝ THÀNH CÔNG"
+            status_text = await page.inner_text('.order-result-info__title-status span')
+            # Extract the src attribute of the img element
+            img_src = await page.get_attribute('.order-result-info__ic-status img', 'src')
+            if status_text == "ĐĂNG KÝ THÀNH CÔNG" or img_src == "/static/imgs/ic_order_success.svg":
+                return True
+            else:
+                return False         
+        except Exception as e:
+            print(f"An error occurred during extraction: {e}")
+            return False
+     
+
+async def handle_result(page: Page, order_id):
     error_selector = 'div.ant-form-item-explain-error'
     try:
         await page.wait_for_selector(error_selector, state="visible", timeout=TIMEOUT)
@@ -176,29 +216,38 @@ async def handle_result(page: Page, order_data: dict):
         logging.error(f"Error message detected: {error_text}")
         if "Mã OTP không chính xác hoặc hết hiệu lực" in error_text:
             logging.info("Clicked the wrong OTP button.")
-            await send_telegram_message("Wrong OTP")
-        await send_telegram_message("Failure")
+            await send_telegram_message("Wrong OTP", order_id)
+            return  
+        else:
+            await send_telegram_message("Failure", order_id)
 
     except Exception:
         is_success_visible = await page.is_visible('div.order-success.pt-5.text-center')
-        is_failed_visible = await page.is_visible('div.order-failure.pt-5.text-center')
 
         if is_success_visible:
             logging.info("Order submitted successfully.")
-            await send_telegram_message("Success")
-        elif is_failed_visible:
+            await send_telegram_message("Success", order_id)
+            return
+        
+        if await extract_order_info(page):
+            logging.info("Success message is visible.")
+            await send_telegram_message("Success", order_id)
+            return
+        is_failed_visible = await page.is_visible('div.order-failure.pt-5.text-center')
+        if is_failed_visible:
             logging.error("Order submission failed.")
-            await send_telegram_message("Failure")
+            await send_telegram_message("Failure", order_id)
+            return
         else:
             logging.warning("No visible success or failure state detected.")
-            await send_telegram_message("Failure")
-        if browswer:
-            await browswer.close()
+            await send_telegram_message("Failure", order_id)
+            return
+        # if browswer:
+        #     await browswer.close()
 
 async def find_and_click_button(message, button_text):
     if message:
         logging.info(f"Looking for button with text: '{button_text}'")
-        logging.info(f"MESSAGES: '{message}'")
         
         if message.reply_markup:
             if button_text ==  "Success":
@@ -218,6 +267,7 @@ async def find_and_click_button(message, button_text):
         logging.info("message data doesn't exsist!")
     # if browser:
     #     await close_broswer(browser)                
+
 async def main():
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
@@ -236,11 +286,10 @@ async def main():
             await handle_browser_automation(order_data)
             
         else:
-            global msg
-            msg = event.message
-            print("message info===>",msg)
+            global MSG
             order_data = extract_order_data(message_text)
-
+            if order_data.get('OrderID'):
+                MSG.append(event.message)
             if order_data.get('OrderID') in pending_orders:
                 previous_data = pending_orders[order_data['OrderID']]
                 previous_data.update(order_data)

@@ -218,6 +218,7 @@ async def find_and_click_button(message, button_text):
         logging.info("message data doesn't exsist!")
     # if browser:
     #     await close_broswer(browser)                
+
 async def main():
   async with TelegramClient('session_name', API_ID, API_HASH) as client:
     await client.start(bot_token=BOT_TOKEN)
